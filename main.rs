@@ -15,8 +15,8 @@ extern mod compress;
 use std::hashmap::HashMap;
 use std::{io, os, str, vec};
 use compress::{bwt, lz4};
+use compress::entropy::ari;
 use compress::shared::FiniteWriter;
-//use compress::entropy::ari;
 
 
 static MAGIC    : u32   = 0x73632172;   //=r!cs
@@ -69,7 +69,6 @@ pub fn main() {
         decode: |r,_| r,
         info: ~"pass-through",
     });
-    /* // unclear what to do with Ari since it requires the size to be known
     passes.insert(~"ari", Pass {
         encode: |w,_c| {
             ~ari::ByteEncoder::new(w) as ~FiniteWriter
@@ -78,7 +77,7 @@ pub fn main() {
             ~ari::ByteDecoder::new(r) as ~Reader
         },
         info: ~"Adaptive arithmetic byte coder",
-    });*/
+    });
     passes.insert(~"bwt", Pass {
         encode: |w,c| {
             ~bwt::Encoder::new(w, c.block_size) as ~FiniteWriter

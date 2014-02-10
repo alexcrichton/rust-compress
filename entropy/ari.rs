@@ -444,6 +444,7 @@ impl Model for FrequencyTable {
 
 
 /// A basic byte-encoding arithmetic
+/// uses a special terminator code to end the stream
 pub struct ByteEncoder<W> {
     /// A lower level encoder
     encoder: Encoder<W>,
@@ -457,7 +458,7 @@ impl<W: Writer> ByteEncoder<W> {
         let freq_max = range_default_threshold >> 2;
         ByteEncoder {
             encoder: Encoder::new(w),
-            freq: FrequencyTable::new_flat(symbol_total, freq_max),
+            freq: FrequencyTable::new_flat(symbol_total+1, freq_max),
         }
     }
 }
@@ -479,17 +480,21 @@ impl<W: Writer> Writer for ByteEncoder<W> {
 
 impl<W: FiniteWriter> FiniteWriter for ByteEncoder<W> {
     fn write_terminator(&mut self) -> io::IoResult<()> {
-        self.encoder.write_terminator()
+        self.encoder.encode(symbol_total, &self.freq).
+            and(self.encoder.write_terminator())
     }
 }
 
 
 /// A basic byte-decoding arithmetic
+/// expects a special terminator code for the end of the stream
 pub struct ByteDecoder<R> {
     /// A lower level decoder
     decoder: Decoder<R>,
     /// A basic frequency table
     freq: FrequencyTable,
+    /// Remember if we found the terminator code
+    priv is_eof: bool,
 }
 
 impl<R: Reader> ByteDecoder<R> {
@@ -499,7 +504,8 @@ impl<R: Reader> ByteDecoder<R> {
         let freq_max = range_default_threshold >> 2;
         ByteDecoder {
             decoder: Decoder::new(r),
-            freq: FrequencyTable::new_flat(symbol_total, freq_max),
+            freq: FrequencyTable::new_flat(symbol_total+1, freq_max),
+            is_eof: false,
         }
     }
 }
@@ -509,20 +515,21 @@ impl<R: Reader> Reader for ByteDecoder<R> {
         if self.decoder.tell() == 0 {
             if_ok!(self.decoder.start());
         }
-        let mut ret = Ok(dst.len());
-        for out_byte in dst.mut_iter() {
-            match self.decoder.decode(&self.freq) {
-                Ok(value) => {
-                    self.freq.update(value, 10, 1);
-                    *out_byte = value as u8;
-                },
-                Err(e) => {
-                    ret = Err(e);
-                    break
-                }
-            }
+        if self.is_eof {
+            return Err(io::standard_error(io::EndOfFile))
         }
-        ret
+        let mut amount = 0u;
+        for out_byte in dst.mut_iter() {
+            let value = if_ok!(self.decoder.decode(&self.freq));
+            if value == symbol_total {
+                self.is_eof = true;
+                break
+            }
+            self.freq.update(value, 10, 1);
+            *out_byte = value as u8;
+            amount += 1;
+        }
+        Ok(amount)
     }
 }
 

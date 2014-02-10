@@ -26,6 +26,7 @@ can be found at https://github.com/bkaradzic/go-lz4.
 use std::io;
 use std::num;
 use std::vec;
+use shared::FiniteWriter;
 
 static MAGIC: u32 = 0x184d2204;
 
@@ -243,6 +244,7 @@ impl<R: Reader> Decoder<R> {
             // raw block to read
             n if n & 0x80000000 != 0 => {
                 let amt = (n & 0x7fffffff) as uint;
+                debug!("decoding a raw block of size {}", amt)
                 self.output.truncate(0);
                 self.output.reserve(amt);
                 if_ok!(self.r.push_bytes(&mut self.output, amt));
@@ -252,12 +254,14 @@ impl<R: Reader> Decoder<R> {
 
             // actual block to decompress
             n => {
+                debug!("decoding a compressed block of size {}", n);
                 let n = n as uint;
                 self.temp.truncate(0);
                 self.temp.reserve(n);
                 if_ok!(self.r.push_bytes(&mut self.temp, n));
 
                 let target = num::min(self.max_block_size, 4 * n / 3);
+                debug!("target size: {}", target);
                 self.output.truncate(0);
                 self.output.reserve(target);
                 let mut decoder = BlockDecoder {
@@ -269,6 +273,7 @@ impl<R: Reader> Decoder<R> {
                 };
                 self.start = 0;
                 self.end = decoder.decode();
+                debug!("end of block: {}", self.end);
             }
         }
 
@@ -276,6 +281,8 @@ impl<R: Reader> Decoder<R> {
             let cksum = if_ok!(self.r.read_le_u32());
             debug!("ignoring block checksum {:?}", cksum);
         }
+
+        debug!("block is done");
         return Ok(true);
     }
 
@@ -357,15 +364,13 @@ impl<W: Writer> Encoder<W> {
         false
     }
 
-    /// This function is used to flag that this session of compression is done
-    /// with. The stream is finished up (final bytes are written), and then the
-    /// wrapped writer is returned.
-    pub fn finish(mut self) -> (W, io::IoResult<()>) {
-        let result = self.flush();
-        let result = result.and(self.w.write_le_u32(0));
-        // XXX: this checksum is wrong
-        let result = result.and(self.w.write_le_u32(0));
-        (self.w, result)
+    /// End the current block
+    fn finish_block(&mut self) -> io::IoResult<()> {
+        if self.buf.len() > 0 {
+            self.encode_block()
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -396,12 +401,30 @@ impl<W: Writer> Writer for Encoder<W> {
     }
 
     fn flush(&mut self) -> io::IoResult<()> {
-        if self.buf.len() > 0 {
-            if_ok!(self.encode_block());
-        }
-        self.w.flush()
+        self.finish_block().and(self.w.flush())
     }
 }
+
+impl<W: FiniteWriter> FiniteWriter for Encoder<W> {
+    fn write_terminator(&mut self) -> io::IoResult<()> {
+        let result = self.finish_block();
+        let result = result.and(self.w.write_le_u32(0));
+        // XXX: this checksum is wrong
+        let result = result.and(self.w.write_le_u32(0));
+        result.and(self.w.write_terminator())
+    }
+}
+
+impl<W: FiniteWriter> Encoder<W> {
+    /// This function is used to flag that this session of compression is done
+    /// with. The stream is finished up (final bytes are written), and then the
+    /// wrapped writer is returned.
+    pub fn finish(mut self) -> (W, io::IoResult<()>) {
+        let result = (&mut self as &mut FiniteWriter).write_terminator();
+        (self.w, result)
+    }
+}
+
 
 #[cfg(test)]
 mod test {

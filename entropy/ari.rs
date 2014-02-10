@@ -33,6 +33,7 @@ This is an original implementation.
 */
 
 use std::{io, vec};
+use shared::FiniteWriter;
 
 pub type Symbol = u8;
 static symbol_bits: uint = 8;
@@ -184,16 +185,6 @@ impl<W: Writer> Encoder<W> {
         self.stream.write(bytes)
     }
 
-    /// Finish decoding by writing the code tail word
-    pub fn finish(mut self) -> (W, io::IoResult<()>) {
-        assert!(border_bits == 32);
-        self.bytes_written += 4;
-        let code = self.range.get_code_tail();
-        let result = self.stream.write_be_u32(code);
-        let result = result.and(self.stream.flush());
-        (self.stream, result)
-    }
-
     /// Flush the output stream
     pub fn flush(&mut self) -> io::IoResult<()> {
         self.stream.flush()
@@ -204,6 +195,24 @@ impl<W: Writer> Encoder<W> {
         self.bytes_written
     }
 }
+
+impl<W: FiniteWriter> Encoder<W> {
+    /// Finish decoding by writing the code tail word
+    pub fn finish(mut self) -> (W, io::IoResult<()>) {
+        let ret = self.write_terminator();
+        (self.stream, ret)
+    }
+
+    /// Write code tail bits
+    pub fn write_terminator(&mut self) -> io::IoResult<()> {
+        assert!(border_bits == 32);
+        self.bytes_written += 4;
+        let code = self.range.get_code_tail();
+        let result = self.stream.write_be_u32(code);
+        result.and(self.stream.write_terminator())
+    }
+}
+
 
 /// An arithmetic decoder helper
 pub struct Decoder<R> {
@@ -465,6 +474,12 @@ impl<W: Writer> Writer for ByteEncoder<W> {
 
     fn flush(&mut self) -> io::IoResult<()> {
         self.encoder.flush()
+    }
+}
+
+impl<W: FiniteWriter> FiniteWriter for ByteEncoder<W> {
+    fn write_terminator(&mut self) -> io::IoResult<()> {
+        self.encoder.write_terminator()
     }
 }
 

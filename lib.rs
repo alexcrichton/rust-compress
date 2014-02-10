@@ -14,6 +14,7 @@ pub mod bwt;
 pub mod dc;
 pub mod flate;
 pub mod lz4;
+pub mod shared;
 pub mod zlib;
 
 /// Entropy coder family

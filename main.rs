@@ -15,6 +15,7 @@ extern mod compress;
 use std::hashmap::HashMap;
 use std::{io, os, str, vec};
 use compress::{bwt, lz4};
+use compress::shared::FiniteWriter;
 //use compress::entropy::ari;
 
 
@@ -54,8 +55,8 @@ impl Config {
 }
 
 struct Pass {
-    encode: 'static |~Writer,&Config| -> ~io::Writer,
-    decode: 'static |~Reader,&Config| -> ~io::Reader,
+    encode: 'static |~FiniteWriter, &Config| -> ~FiniteWriter,
+    decode: 'static |~Reader, &Config| -> ~Reader,
     info: ~str,
 }
 
@@ -71,7 +72,7 @@ pub fn main() {
     /* // unclear what to do with Ari since it requires the size to be known
     passes.insert(~"ari", Pass {
         encode: |w,_c| {
-            ~ari::ByteEncoder::new(w) as ~Writer
+            ~ari::ByteEncoder::new(w) as ~FiniteWriter
         },
         decode: |r,_c| {
             ~ari::ByteDecoder::new(r) as ~Reader
@@ -80,7 +81,7 @@ pub fn main() {
     });*/
     passes.insert(~"bwt", Pass {
         encode: |w,c| {
-            ~bwt::Encoder::new(w, c.block_size) as ~Writer
+            ~bwt::Encoder::new(w, c.block_size) as ~FiniteWriter
         },
         decode: |r,_c| {
             ~bwt::Decoder::new(r, true) as ~Reader
@@ -90,7 +91,7 @@ pub fn main() {
     /* // looks like we are missing the encoder implementation
     passes.insert(~"flate", Pass {
         encode: |w,_c| {
-            ~flate::Encoder::new(w, true) as ~Writer
+            ~flate::Encoder::new(w, true) as ~FiniteWriter
         },
         decode: |r,_c| {
             ~flate::Decoder::new(r, true) as ~Reader
@@ -99,7 +100,7 @@ pub fn main() {
     });*/
     passes.insert(~"lz4", Pass {
         encode: |w,_c| {
-            ~lz4::Encoder::new(w) as ~Writer
+            ~lz4::Encoder::new(w) as ~FiniteWriter
         },
         decode: |r,_c| { // LZ4 decoder seem to work
             ~lz4::Decoder::new(r) as ~Reader
@@ -155,7 +156,7 @@ pub fn main() {
             output.write_u8(met.len() as u8).unwrap();
             output.write_str(*met).unwrap();
         }
-        let mut wsum: ~Writer = ~output;
+        let mut wsum: ~FiniteWriter = ~output;
         for met in config.methods.iter() {
             match passes.find(met) {
                 Some(pa) => wsum = (pa.encode)(wsum, &config),
@@ -163,6 +164,6 @@ pub fn main() {
             }
         }
         io::util::copy(&mut input, &mut wsum).unwrap();
-        wsum.flush().unwrap();
+        wsum.write_terminator().unwrap();
     }
 }

@@ -485,6 +485,15 @@ impl<W: FiniteWriter> FiniteWriter for ByteEncoder<W> {
     }
 }
 
+impl<W: FiniteWriter> ByteEncoder<W> {
+    /// Finish encoding and return the underlying stream
+    pub fn finish(mut self) -> (W, io::IoResult<()>) {
+        let ret = self.write_terminator();
+        let (w, ret_encoder) = self.encoder.finish();
+        (w, ret.and(ret_encoder))
+    }
+}
+
 
 /// A basic byte-decoding arithmetic
 /// expects a special terminator code for the end of the stream
@@ -545,12 +554,12 @@ mod test {
         info!("Roundtrip Ari of size {}", bytes.len());
         let mut e = ByteEncoder::new(MemWriter::new());
         e.write(bytes).unwrap();
-        let (e, r) = e.encoder.finish();
+        let (e, r) = e.finish();
         r.unwrap();
         let encoded = e.unwrap();
         debug!("Roundtrip input {:?} encoded {:?}", bytes, encoded);
         let mut d = ByteDecoder::new(BufReader::new(encoded));
-        let decoded = d.read_bytes(bytes.len()).unwrap();
+        let decoded = d.read_to_end().unwrap();
         assert_eq!(bytes.as_slice(), decoded.as_slice());
     }
 

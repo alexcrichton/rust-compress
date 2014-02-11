@@ -16,7 +16,7 @@ use std::hashmap::HashMap;
 use std::{io, os, str, vec};
 use compress::{bwt, lz4};
 use compress::entropy::ari;
-use compress::shared::FiniteWriter;
+use compress::FiniteWriter;
 
 
 static MAGIC    : u32   = 0x73632172;   //=r!cs

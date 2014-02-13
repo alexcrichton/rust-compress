@@ -33,6 +33,7 @@ This is an original implementation.
 */
 
 use std::{io, vec};
+use shared::FiniteWriter;
 
 pub type Symbol = u8;
 static symbol_bits: uint = 8;
@@ -184,16 +185,6 @@ impl<W: Writer> Encoder<W> {
         self.stream.write(bytes)
     }
 
-    /// Finish decoding by writing the code tail word
-    pub fn finish(mut self) -> (W, io::IoResult<()>) {
-        assert!(border_bits == 32);
-        self.bytes_written += 4;
-        let code = self.range.get_code_tail();
-        let result = self.stream.write_be_u32(code);
-        let result = result.and(self.stream.flush());
-        (self.stream, result)
-    }
-
     /// Flush the output stream
     pub fn flush(&mut self) -> io::IoResult<()> {
         self.stream.flush()
@@ -204,6 +195,24 @@ impl<W: Writer> Encoder<W> {
         self.bytes_written
     }
 }
+
+impl<W: FiniteWriter> Encoder<W> {
+    /// Finish decoding by writing the code tail word
+    pub fn finish(mut self) -> (W, io::IoResult<()>) {
+        let ret = self.write_terminator();
+        (self.stream, ret)
+    }
+
+    /// Write code tail bits
+    pub fn write_terminator(&mut self) -> io::IoResult<()> {
+        assert!(border_bits == 32);
+        self.bytes_written += 4;
+        let code = self.range.get_code_tail();
+        let result = self.stream.write_be_u32(code);
+        result.and(self.stream.write_terminator())
+    }
+}
+
 
 /// An arithmetic decoder helper
 pub struct Decoder<R> {
@@ -435,6 +444,7 @@ impl Model for FrequencyTable {
 
 
 /// A basic byte-encoding arithmetic
+/// uses a special terminator code to end the stream
 pub struct ByteEncoder<W> {
     /// A lower level encoder
     encoder: Encoder<W>,
@@ -448,7 +458,7 @@ impl<W: Writer> ByteEncoder<W> {
         let freq_max = range_default_threshold >> 2;
         ByteEncoder {
             encoder: Encoder::new(w),
-            freq: FrequencyTable::new_flat(symbol_total, freq_max),
+            freq: FrequencyTable::new_flat(symbol_total+1, freq_max),
         }
     }
 }
@@ -468,13 +478,32 @@ impl<W: Writer> Writer for ByteEncoder<W> {
     }
 }
 
+impl<W: FiniteWriter> FiniteWriter for ByteEncoder<W> {
+    fn write_terminator(&mut self) -> io::IoResult<()> {
+        self.encoder.encode(symbol_total, &self.freq).
+            and(self.encoder.write_terminator())
+    }
+}
+
+impl<W: FiniteWriter> ByteEncoder<W> {
+    /// Finish encoding and return the underlying stream
+    pub fn finish(mut self) -> (W, io::IoResult<()>) {
+        let ret = self.write_terminator();
+        let (w, ret_encoder) = self.encoder.finish();
+        (w, ret.and(ret_encoder))
+    }
+}
+
 
 /// A basic byte-decoding arithmetic
+/// expects a special terminator code for the end of the stream
 pub struct ByteDecoder<R> {
     /// A lower level decoder
     decoder: Decoder<R>,
     /// A basic frequency table
     freq: FrequencyTable,
+    /// Remember if we found the terminator code
+    priv is_eof: bool,
 }
 
 impl<R: Reader> ByteDecoder<R> {
@@ -484,7 +513,8 @@ impl<R: Reader> ByteDecoder<R> {
         let freq_max = range_default_threshold >> 2;
         ByteDecoder {
             decoder: Decoder::new(r),
-            freq: FrequencyTable::new_flat(symbol_total, freq_max),
+            freq: FrequencyTable::new_flat(symbol_total+1, freq_max),
+            is_eof: false,
         }
     }
 }
@@ -494,20 +524,21 @@ impl<R: Reader> Reader for ByteDecoder<R> {
         if self.decoder.tell() == 0 {
             if_ok!(self.decoder.start());
         }
-        let mut ret = Ok(dst.len());
-        for out_byte in dst.mut_iter() {
-            match self.decoder.decode(&self.freq) {
-                Ok(value) => {
-                    self.freq.update(value, 10, 1);
-                    *out_byte = value as u8;
-                },
-                Err(e) => {
-                    ret = Err(e);
-                    break
-                }
-            }
+        if self.is_eof {
+            return Err(io::standard_error(io::EndOfFile))
         }
-        ret
+        let mut amount = 0u;
+        for out_byte in dst.mut_iter() {
+            let value = if_ok!(self.decoder.decode(&self.freq));
+            if value == symbol_total {
+                self.is_eof = true;
+                break
+            }
+            self.freq.update(value, 10, 1);
+            *out_byte = value as u8;
+            amount += 1;
+        }
+        Ok(amount)
     }
 }
 
@@ -523,12 +554,12 @@ mod test {
         info!("Roundtrip Ari of size {}", bytes.len());
         let mut e = ByteEncoder::new(MemWriter::new());
         e.write(bytes).unwrap();
-        let (e, r) = e.encoder.finish();
+        let (e, r) = e.finish();
         r.unwrap();
         let encoded = e.unwrap();
         debug!("Roundtrip input {:?} encoded {:?}", bytes, encoded);
         let mut d = ByteDecoder::new(BufReader::new(encoded));
-        let decoded = d.read_bytes(bytes.len()).unwrap();
+        let decoded = d.read_to_end().unwrap();
         assert_eq!(bytes.as_slice(), decoded.as_slice());
     }
 

@@ -8,7 +8,10 @@
 
 extern mod extra;
 
+pub use self::shared::FiniteWriter;
+
 mod adler32;
+mod shared;
 
 pub mod bwt;
 pub mod dc;

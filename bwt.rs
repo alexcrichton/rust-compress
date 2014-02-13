@@ -48,6 +48,7 @@ This is an original (mostly trivial) implementation.
 */
 
 use std::{io, iter, num, vec};
+use shared::FiniteWriter;
 
 pub static total_symbols: uint = 0x100;
 
@@ -167,7 +168,6 @@ pub fn encode_brute(input: &[u8], suf: &mut [Suffix], fn_out: |u8|) -> Suffix {
         }
     }
 
-    assert!( origin.is_some() );
     origin.unwrap()
 }
 
@@ -335,7 +335,7 @@ impl<R: Reader> Reader for Decoder<R> {
             self.header = true;
         }
         let mut amt = dst.len();
-        let len = amt;
+        let dst_len = amt;
 
         while amt > 0 {
             if self.output.len() == self.start {
@@ -344,19 +344,19 @@ impl<R: Reader> Reader for Decoder<R> {
                    break
                 }
             }
-            let n = num::min( amt, self.output.len() - self.start );
+            let n = num::min(amt, self.output.len() - self.start);
             vec::bytes::copy_memory(
-                dst.mut_slice_from(len - amt),
-                self.output.slice_from(self.start)
+                dst.mut_slice_from(dst_len - amt),
+                self.output.slice(self.start, self.start + n)
                 );
             self.start += n;
             amt -= n;
         }
 
-        if len == amt {
+        if dst_len == amt {
             Err(io::standard_error(io::EndOfFile))
         } else {
-            Ok(len - amt)
+            Ok(dst_len - amt)
         }
     }
 }
@@ -404,12 +404,13 @@ impl<W: Writer> Encoder<W> {
         Ok(())
     }
 
-    /// This function is used to flag that this session of compression is done
-    /// with. The stream is finished up (final bytes are written), and then the
-    /// wrapped writer is returned.
-    pub fn finish(mut self) -> (W, io::IoResult<()>) {
-        let result = self.flush();
-        (self.w, result)
+    /// End the current block
+    fn finish_block(&mut self) -> io::IoResult<()> {
+        if self.buf.len() > 0 {
+            self.encode_block()
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -433,12 +434,23 @@ impl<W: Writer> Writer for Encoder<W> {
     }
 
     fn flush(&mut self) -> io::IoResult<()> {
-        let ret = if self.buf.len() > 0 {
-            self.encode_block()
-        } else {
-            Ok(())
-        };
-        ret.and(self.w.flush())
+        self.finish_block().and(self.w.flush())
+    }
+}
+
+impl<W: FiniteWriter> FiniteWriter for Encoder<W> {
+    fn write_terminator(&mut self) -> io::IoResult<()> {
+        self.finish_block().and(self.w.write_terminator())
+    }
+}
+
+impl<W: FiniteWriter> Encoder<W> {
+    /// This function is used to flag that this session of compression is done
+    /// with. The stream is finished up (final bytes are written), and then the
+    /// wrapped writer is returned.
+    pub fn finish(mut self) -> (W, io::IoResult<()>) {
+        let result = (&mut self as &mut FiniteWriter).write_terminator();
+        (self.w, result)
     }
 }
 

@@ -25,13 +25,14 @@ can be found at https://github.com/bkaradzic/go-lz4.
 
 use std::io;
 use std::cmp;
-use std::vec;
+use std::vec::bytes::copy_memory;
+use std::vec_ng::Vec;
 
 static MAGIC: u32 = 0x184d2204;
 
 struct BlockDecoder<'a> {
     input: &'a [u8],
-    output: &'a mut ~[u8],
+    output: &'a mut Vec<u8>,
     cur: uint,
 
     start: uint,
@@ -50,8 +51,8 @@ impl<'a> BlockDecoder<'a> {
                 let len = self.length(code >> 4);
                 debug!("consume len {}", len);
                 self.grow_output(self.end + len);
-                vec::bytes::copy_memory(self.output.mut_slice_from(self.end),
-                                        self.input.slice(self.cur, self.cur + len));
+                copy_memory(self.output.as_mut_slice().mut_slice_from(self.end),
+                            self.input.slice(self.cur, self.cur + len));
                 self.end += len;
                 self.cur += len;
             }
@@ -102,7 +103,8 @@ impl<'a> BlockDecoder<'a> {
     fn cp(&mut self, len: uint, decr: uint) {
         self.grow_output(self.end + len);
         for i in range(0, len) {
-            self.output[self.end + i] = self.output[self.start + i];
+            let tmp = *self.output.get(self.start + i);
+            *self.output.get_mut(self.end + i) = tmp;
         }
 
         self.end += len;
@@ -135,8 +137,8 @@ pub struct Decoder<R> {
     /// progress the output stream will get corrupted.
     r: R,
 
-    priv temp: ~[u8],
-    priv output: ~[u8],
+    priv temp: Vec<u8>,
+    priv output: Vec<u8>,
 
     priv start: uint,
     priv end: uint,
@@ -155,8 +157,8 @@ impl<R: Reader> Decoder<R> {
     pub fn new(r: R) -> Decoder<R> {
         Decoder {
             r: r,
-            temp: ~[],
-            output: ~[],
+            temp: Vec::new(),
+            output: Vec::new(),
             header: false,
             blk_checksum: false,
             stream_checksum: false,
@@ -245,7 +247,11 @@ impl<R: Reader> Decoder<R> {
                 let amt = (n & 0x7fffffff) as uint;
                 self.output.truncate(0);
                 self.output.reserve(amt);
-                try!(self.r.push_bytes(&mut self.output, amt));
+                //try!(self.r.push_bytes(&mut self.output, amt));
+                for _ in range(0, amt) {
+                    let tmp = try!(self.r.read_byte());
+                    self.output.push(tmp);
+                }
                 self.start = 0;
                 self.end = amt;
             }
@@ -255,7 +261,11 @@ impl<R: Reader> Decoder<R> {
                 let n = n as uint;
                 self.temp.truncate(0);
                 self.temp.reserve(n);
-                try!(self.r.push_bytes(&mut self.temp, n));
+                //try!(self.r.push_bytes(&mut self.temp, n));
+                for _ in range(0, n) {
+                    let tmp = try!(self.r.read_byte());
+                    self.temp.push(tmp);
+                }
 
                 let target = cmp::min(self.max_block_size, 4 * n / 3);
                 self.output.truncate(0);
@@ -302,8 +312,8 @@ impl<R: Reader> Reader for Decoder<R> {
                 }
             }
             let n = cmp::min(amt, self.end - self.start);
-            vec::bytes::copy_memory(dst.mut_slice_from(len - amt),
-                                    self.output.slice(self.start, self.start + n));
+            copy_memory(dst.mut_slice_from(len - amt),
+                        self.output.slice(self.start, self.start + n));
             self.start += n;
             amt -= n;
         }
@@ -317,8 +327,8 @@ impl<R: Reader> Reader for Decoder<R> {
 /// bytes will be written to.
 pub struct Encoder<W> {
     priv w: W,
-    priv buf: ~[u8],
-    priv tmp: ~[u8],
+    priv buf: Vec<u8>,
+    priv tmp: Vec<u8>,
     priv wrote_header: bool,
     priv limit: uint,
 }
@@ -334,8 +344,8 @@ impl<W: Writer> Encoder<W> {
         Encoder {
             w: w,
             wrote_header: false,
-            buf: vec::with_capacity(1024),
-            tmp: ~[],
+            buf: Vec::with_capacity(1024),
+            tmp: Vec::new(),
             limit: 256 * 1024,
         }
     }
@@ -344,10 +354,10 @@ impl<W: Writer> Encoder<W> {
         self.tmp.truncate(0);
         if self.compress() {
             try!(self.w.write_le_u32(self.tmp.len() as u32));
-            try!(self.w.write(self.tmp))
+            try!(self.w.write(self.tmp.as_slice()))
         } else {
             try!(self.w.write_le_u32((self.buf.len() as u32) | 0x80000000));
-            try!(self.w.write(self.buf))
+            try!(self.w.write(self.buf.as_slice()))
         }
         self.buf.truncate(0);
         Ok(())
@@ -408,12 +418,13 @@ mod test {
     use rand;
     use test;
     use std::io::{BufReader, MemWriter};
+    use std::vec_ng::Vec;
     use super::{Decoder, Encoder};
 
     fn test_decode(input: &[u8], output: &[u8]) {
         let mut d = Decoder::new(BufReader::new(input));
 
-        let got = d.read_to_end().unwrap();
+        let got: Vec<u8> = d.bytes().map(|b| b.unwrap()).collect();
         assert!(got.as_slice() == output);
     }
 
@@ -436,7 +447,7 @@ mod test {
         let input = include_bin!("data/test.lz4.1");
         let mut d = Decoder::new(BufReader::new(input));
         assert!(!d.eof());
-        let mut out = ~[];
+        let mut out = Vec::new();
         loop {
             match d.read_byte() {
                 Ok(b) => out.push(b),
@@ -451,7 +462,7 @@ mod test {
     fn random_byte_lengths() {
         let input = include_bin!("data/test.lz4.1");
         let mut d = Decoder::new(BufReader::new(input));
-        let mut out = ~[];
+        let mut out = Vec::new();
         let mut buf = [0u8, ..40];
         loop {
             match d.read(buf.mut_slice_to(1 + rand::random::<uint>() % 40)) {
@@ -469,10 +480,9 @@ mod test {
         e.write(bytes).unwrap();
         let (e, err) = e.finish();
         err.unwrap();
-        let encoded = e.unwrap();
 
-        let mut d = Decoder::new(BufReader::new(encoded));
-        let decoded = d.read_to_end().unwrap();
+        let mut d = Decoder::new(BufReader::new(e.get_ref()));
+        let decoded: Vec<u8> = d.bytes().map(|b| b.unwrap()).collect();
         assert_eq!(decoded.as_slice(), bytes);
     }
 

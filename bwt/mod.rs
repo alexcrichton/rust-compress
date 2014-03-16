@@ -48,6 +48,7 @@ This is an original (mostly trivial) implementation.
 */
 
 use std::{cmp, io, iter, vec};
+use std::vec_ng::Vec;
 
 pub mod dc;
 pub mod mtf;
@@ -200,10 +201,10 @@ pub fn encode<'a, SUF: NumCast + ToPrimitive>(input: &'a [Symbol], suf_array: &'
 
 /// Transform an input block into the output slice, all-inclusive version.
 /// Returns the index of the original string in the output matrix.
-pub fn encode_simple(input: &[Symbol]) -> (~[Symbol], uint) {
-    let mut suf_array = vec::from_elem(input.len(), 0u);
-    let mut iter = encode(input, suf_array);
-    let output = iter.to_owned_vec();
+pub fn encode_simple(input: &[Symbol]) -> (Vec<Symbol>, uint) {
+    let mut suf_array = Vec::from_elem(input.len(), 0u);
+    let mut iter = encode(input, suf_array.as_mut_slice());
+    let output: Vec<Symbol> = iter.collect();
     (output, iter.get_origin())
 }
 
@@ -273,9 +274,9 @@ pub fn decode<'a, SUF: NumCast>(input: &'a [Symbol], origin: uint, table: &'a mu
 }
 
 /// A simplified BWT decode function, which allocates a temporary suffix array
-pub fn decode_simple(input: &[Symbol], origin: uint) -> ~[Symbol] {
-    let mut suf = vec::from_elem(input.len(), 0 as uint);
-    decode(input, origin, suf).take(input.len()).to_owned_vec()
+pub fn decode_simple(input: &[Symbol], origin: uint) -> Vec<Symbol> {
+    let mut suf = Vec::from_elem(input.len(), 0 as uint);
+    decode(input, origin, suf.as_mut_slice()).take(input.len()).collect()
 }
 
 /// Decode without additional memory, can be greatly optimized
@@ -310,9 +311,9 @@ pub struct Decoder<R> {
     r: R,
     priv start  : uint,
 
-    priv temp   : ~[u8],
-    priv output : ~[u8],
-    priv table  : ~[uint],
+    priv temp   : Vec<u8>,
+    priv output : Vec<u8>,
+    priv table  : Vec<uint>,
 
     priv header         : bool,
     priv max_block_size : uint,
@@ -328,9 +329,9 @@ impl<R: Reader> Decoder<R> {
         Decoder {
             r: r,
             start: 0,
-            temp: ~[],
-            output: ~[],
-            table: ~[],
+            temp: Vec::new(),
+            output: Vec::new(),
+            table: Vec::new(),
             header: false,
             max_block_size: 0,
             extra_memory: extra_mem,
@@ -365,7 +366,11 @@ impl<R: Reader> Decoder<R> {
 
         self.temp.truncate(0);
         self.temp.reserve(n);
-        try!(self.r.push_bytes(&mut self.temp, n));
+        //try!(self.r.push_bytes(self.temp.as_mut_slice(), n));
+        for _ in range(0, n) {
+            let byte = try!(self.r.read_byte());
+            self.temp.push(byte);
+        }
 
         let origin = try!(self.r.read_le_u32()) as uint;
         self.output.truncate(0);
@@ -373,13 +378,13 @@ impl<R: Reader> Decoder<R> {
 
         if self.extra_memory    {
             self.table.truncate(0);
-            self.table.grow_fn(n, |_| 0);
-            for ch in decode(self.temp, origin, self.table) {
+            self.table.grow(n, &0);
+            for ch in decode(self.temp.as_slice(), origin, self.table.as_mut_slice()) {
                 self.output.push(ch);
             }
         }else   {
-            self.output.grow_fn(n, |_| 0);
-            decode_minimal(self.temp, origin, self.output);
+            self.output.grow(n, &0);
+            decode_minimal(self.temp.as_slice(), origin, self.output.as_mut_slice());
         }
 
         self.start = 0;
@@ -425,8 +430,8 @@ impl<R: Reader> Reader for Decoder<R> {
 /// This is a wrapper around an internal writer which bytes will be written to.
 pub struct Encoder<W> {
     priv w: W,
-    priv buf: ~[u8],
-    priv suf: ~[uint],
+    priv buf: Vec<u8>,
+    priv suf: Vec<uint>,
     priv wrote_header: bool,
     priv block_size: uint,
 }
@@ -440,8 +445,8 @@ impl<W: Writer> Encoder<W> {
     pub fn new(w: W, block_size: uint) -> Encoder<W> {
         Encoder {
             w: w,
-            buf: ~[],
-            suf: ~[],
+            buf: Vec::new(),
+            suf: Vec::new(),
             wrote_header: false,
             block_size: block_size,
         }
@@ -452,11 +457,11 @@ impl<W: Writer> Encoder<W> {
         try!(self.w.write_le_u32(n as u32));
 
         self.suf.truncate(0);
-        self.suf.grow_fn(n, |_| n);
+        self.suf.grow(n, &n);
         let w = &mut self.w;
 
         {
-            let mut iter = encode(self.buf, self.suf);
+            let mut iter = encode(self.buf.as_slice(), self.suf.as_mut_slice());
             for ch in iter {
                 try!(w.write_u8(ch));
             }
@@ -511,7 +516,7 @@ impl<W: Writer> Writer for Encoder<W> {
 mod test {
     use test;
     use std::io::{BufReader, MemWriter};
-    use std::vec;
+    use std::vec_ng::Vec;
     use super::{encode, decode, Decoder, Encoder};
 
     fn roundtrip(bytes: &[u8], extra_mem: bool) {
@@ -519,10 +524,9 @@ mod test {
         e.write(bytes).unwrap();
         let (e, err) = e.finish();
         err.unwrap();
-        let encoded = e.unwrap();
 
-        let mut d = Decoder::new(BufReader::new(encoded), extra_mem);
-        let decoded = d.read_to_end().unwrap();
+        let mut d = Decoder::new(BufReader::new(e.get_ref()), extra_mem);
+        let decoded: Vec<u8> = d.bytes().map(|x| x.unwrap()).collect();
         assert_eq!(decoded.as_slice(), bytes);
     }
 
@@ -542,14 +546,14 @@ mod test {
     fn decode_speed(bh: &mut test::BenchHarness) {
         let input = include_bin!("../data/test.txt");
         let n = input.len();
-        let mut suf = vec::from_elem(n, 0u16);
+        let mut suf = Vec::from_elem(n, 0u16);
         let (output, origin) = {
-            let mut to_iter = encode(input, suf);
-            let out = to_iter.to_owned_vec();
+            let mut to_iter = encode(input, suf.as_mut_slice());
+            let out: Vec<u8> = to_iter.collect();
             (out, to_iter.get_origin())
         };
         bh.iter(|| {
-            let mut from_iter = decode(output, origin, suf);
+            let mut from_iter = decode(output.as_slice(), origin, suf.as_mut_slice());
             from_iter.last().unwrap();
         });
         bh.bytes = n as u64;

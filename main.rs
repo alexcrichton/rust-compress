@@ -13,7 +13,8 @@ extern crate compress;
 extern crate collections;
 
 use collections::HashMap;
-use std::{io, os, str, vec};
+use std::{io, str};
+use std::vec_ng::Vec;
 use compress::{bwt, lz4};
 //use compress::entropy::ari;
 
@@ -22,7 +23,7 @@ static MAGIC    : u32   = 0x73632172;   //=r!cs
 
 struct Config {
     exe_name: ~str,
-    methods: ~[~str],
+    methods: Vec<~str>,
     block_size: uint,
     decompress: bool,
 }
@@ -31,7 +32,7 @@ impl Config {
     fn query(args: &[~str]) -> Config {
         let mut cfg = Config {
             exe_name: args[0].clone(),
-            methods: ~[],
+            methods: Vec::new(),
             block_size: 1<<16,
             decompress: false,
         };
@@ -118,7 +119,8 @@ pub fn main() {
         info: ~"Ziv-Lempel derivative, focused at speed",
     });
 
-    let config = Config::query(os::args());
+    //let config = Config::query(os::args());
+    let config = Config::query(&[~"app"]); // temporary, until we have os::args() fixed
     let mut input = io::stdin();
     let mut output = io::stdout();
     if config.decompress {
@@ -134,10 +136,10 @@ pub fn main() {
             },
             _ => () //OK
         }
-        let methods = vec::from_fn( input.read_u8().unwrap() as uint, |_| {
+        let methods = Vec::from_fn( input.read_u8().unwrap() as uint, |_| {
             let len = input.read_u8().unwrap() as uint;
-            let bytes = input.read_bytes(len).unwrap();
-            str::from_utf8(bytes).unwrap().to_owned()
+            let bytes: Vec<u8> = input.bytes().map(|x| x.unwrap()).take(len).collect();
+            str::from_utf8(bytes.as_slice()).unwrap().to_owned()
         });
         let mut rsum: ~Reader = ~input;
         for met in methods.iter() {

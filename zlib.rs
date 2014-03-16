@@ -125,20 +125,16 @@ impl<R: Reader> Reader for Decoder<R> {
 }
 
 #[cfg(test)]
-#[allow(warnings)]
 mod test {
     use rand;
     use test;
-    use std::io::{BufReader, MemWriter};
+    use std::io::{BufReader};
+    use std::vec_ng::Vec;
     use super::{Decoder};
-    use std::str;
 
     fn test_decode(input: &[u8], output: &[u8]) {
         let mut d = Decoder::new(BufReader::new(input));
-        let got = match d.read_to_end() {
-            Ok(b) => b,
-            Err(e) => fail!("error reading: {}", e),
-        };
+        let got: Vec<u8> = d.bytes().map(|b| b.unwrap()).collect();
         assert!(got.as_slice() == output);
     }
 
@@ -168,7 +164,7 @@ mod test {
         let input = include_bin!("data/test.z.1");
         let mut d = Decoder::new(BufReader::new(input));
         assert!(!d.eof());
-        let mut out = ~[];
+        let mut out = Vec::new();
         loop {
             match d.read_byte() {
                 Ok(b) => out.push(b),
@@ -183,7 +179,7 @@ mod test {
     fn random_byte_lengths() {
         let input = include_bin!("data/test.z.1");
         let mut d = Decoder::new(BufReader::new(input));
-        let mut out = ~[];
+        let mut out = Vec::new();
         let mut buf = [0u8, ..40];
         loop {
             match d.read(buf.mut_slice_to(1 + rand::random::<uint>() % 40)) {

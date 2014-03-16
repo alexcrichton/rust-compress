@@ -36,7 +36,7 @@ bench: $(LIBTEST)
 
 $(LIBTEST): lib.rs
 	@mkdir -p $(@D)
-	$(RUSTC) $(RUSTFLAGS) --test --out-dir $(@D) lib.rs --dep-info
+	$(RUSTC) $(RUSTFLAGS) --test -A deprecated_owned_vector --out-dir $(@D) lib.rs --dep-info
 
 doctest: $(COMPRESS)
 	$(RUSTDOC) --test lib.rs -L build

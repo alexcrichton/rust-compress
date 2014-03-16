@@ -171,16 +171,18 @@ impl<R: Reader> Reader for Decoder<R> {
 mod test {
     use test;
     use std::io;
+    use std::vec_ng::Vec;
     use super::{Encoder, Decoder};
 
     fn roundtrip(bytes: &[u8]) {
         info!("Roundtrip MTF of size {}", bytes.len());
         let mut e = Encoder::new(io::MemWriter::new());
         e.write(bytes).unwrap();
-        let encoded = e.finish().unwrap();
-        debug!("Roundtrip MTF input: {:?}, ranks: {:?}", bytes, encoded);
-        let mut d = Decoder::new(io::BufReader::new(encoded));
-        let decoded = d.read_to_end().unwrap();
+        let encoded = e.finish();
+        debug!("Roundtrip MTF input: {:?}, ranks: {:?}", bytes, encoded.get_ref());
+        let mut d = Decoder::new(io::BufReader::new(encoded.get_ref()));
+        //let decoded = d.read_to_end().unwrap();
+        let decoded: Vec<u8> = d.bytes().map(|x| x.unwrap()).collect();
         assert_eq!(decoded.as_slice(), bytes);
     }
 
@@ -207,10 +209,10 @@ mod test {
         let input = include_bin!("../data/test.txt");
         let mut e = Encoder::new(io::MemWriter::new());
         e.write(input).unwrap();
-        let encoded = e.finish().unwrap();
+        let encoded = e.finish();
         bh.iter(|| {
-            let mut d = Decoder::new(io::BufReader::new(encoded));
-            d.read_to_end().unwrap();
+            let mut d = Decoder::new(io::BufReader::new(encoded.get_ref()));
+            d.bytes().fold((), |u,_| u);
         });
         bh.bytes = input.len() as u64;
     }

@@ -26,7 +26,8 @@ Thanks to Edgar Binder for inventing DC!
 
 */
 
-use std::{io, vec};
+use std::io;
+use std::vec_ng::Vec;
 use super::mtf::MTF;
 
 pub type Symbol = u8;
@@ -38,11 +39,11 @@ pub static TotalSymbols: uint = 0x100;
 /// write output distance stream into 'distances'
 /// return: unique bytes encountered in the order they appear
 /// with the corresponding initial distances
-pub fn encode<D: Clone + Eq + NumCast>(input: &[Symbol], distances: &mut [D], mtf: &mut MTF) -> ~[(Symbol,D)] {
+pub fn encode<D: Clone + Eq + NumCast>(input: &[Symbol], distances: &mut [D], mtf: &mut MTF) -> Vec<(Symbol,D)> {
     let n = input.len();
     assert_eq!(distances.len(), n);
     let mut last = [n, ..TotalSymbols];
-    let mut unique: ~[(Symbol,D)] = ~[];
+    let mut unique: Vec<(Symbol,D)> = Vec::new();
     let filler: D = NumCast::from(n).unwrap();
     for (i,&sym) in input.iter().enumerate() {
         distances[i] = filler.clone();
@@ -78,20 +79,20 @@ pub fn encode<D: Clone + Eq + NumCast>(input: &[Symbol], distances: &mut [D], mt
 }
 
 /// encode with "batteries included" for quick testing
-pub fn encode_simple<D: Clone + Eq + NumCast>(input: &[Symbol]) -> (~[Symbol],~[D]) {
+pub fn encode_simple<D: Clone + Eq + NumCast>(input: &[Symbol]) -> (Vec<Symbol>, Vec<D>) {
     let n = input.len();
     if n==0 {
-        (~[],~[])
+        (Vec::new(), Vec::new())
     }else   {
-        let mut raw_dist: ~[D] = vec::from_elem(n, NumCast::from(0).unwrap());
-        let pairs = encode(input, raw_dist, &mut MTF::new());
-        let symbols = pairs.map(|&(sym,_)| sym);
+        let mut raw_dist: Vec<D> = Vec::from_elem(n, NumCast::from(0).unwrap());
+        let pairs = encode(input, raw_dist.as_mut_slice(), &mut MTF::new());
+        let mut symbols = pairs.iter().map(|&(sym,_)| sym);
         let init_iter = pairs.iter().map(|pair| { let (_, ref d) = *pair; d.clone() });
         let filler: D = NumCast::from(n).unwrap();
         // chain initial distances with intermediate ones
         let raw_iter = raw_dist.iter().filter_map(|d| if *d!=filler {Some(d.clone())} else {None});
         let mut combined = init_iter.chain(raw_iter);
-        (symbols,combined.collect())
+        (symbols.collect(), combined.collect())
     }
 }
 
@@ -180,8 +181,8 @@ pub fn decode(alphabet: Option<&[Symbol]>, output: &mut [Symbol], mtf: &mut MTF,
 }
 
 /// decode with "batteries included" for quick testing
-pub fn decode_simple<D: ToPrimitive>(n: uint, alphabet: &[Symbol], distances: &[D]) -> ~[Symbol] {
-    let mut output = vec::from_elem(n, 0 as Symbol);
+pub fn decode_simple<D: ToPrimitive>(n: uint, alphabet: &[Symbol], distances: &[D]) -> Vec<Symbol> {
+    let mut output = Vec::from_elem(n, 0 as Symbol);
     let mut di = 0u;
     decode(Some(alphabet), output.as_mut_slice(), &mut MTF::new(), |_sym| {
         di += 1;
@@ -198,6 +199,7 @@ pub fn decode_simple<D: ToPrimitive>(n: uint, alphabet: &[Symbol], distances: &[
 #[cfg(test)]
 mod test {
     use std;
+    use std::vec_ng::Vec;
 
     fn roundtrip(bytes: &[u8]) {
         info!("Roundtrip DC of size {}", bytes.len());
@@ -212,20 +214,20 @@ mod test {
         info!("Roundtrip DC (full alphabet) of size {}", n);
         let mut mtf = super::MTF::new();
         // encoding with full alphabet
-        let mut raw_dist = std::vec::from_elem(n, 0u);
-        let pairs = super::encode(bytes, raw_dist, &mut mtf);
-        let mut alphabet = std::vec::from_elem(0x100, n);
+        let mut raw_dist = Vec::from_elem(n, 0u);
+        let pairs = super::encode(bytes, raw_dist.as_mut_slice(), &mut mtf);
+        let mut alphabet = Vec::from_elem(0x100, n);
         for &(sym,dist) in pairs.iter() {
-            alphabet[sym] = dist;
+            *alphabet.get_mut(sym as uint) = dist;
         }
         let raw_iter = raw_dist.iter().filter(|&d| *d!=n);
-        let distances = alphabet.iter().chain(raw_iter).to_owned_vec();
+        let distances: Vec<&uint> = alphabet.iter().chain(raw_iter).collect();
         // decoding with full alphabet
-        let mut decoded = std::vec::from_elem(n, 0 as super::Symbol);
+        let mut decoded = Vec::from_elem(n, 0 as super::Symbol);
         let mut di = 0u;
         super::decode(None, decoded.as_mut_slice(), &mut mtf, |_sym| {
             di += 1;
-            Ok(distances[di-1].to_uint().unwrap())
+            Ok(distances.get(di-1).to_uint().unwrap())
         }).unwrap();
         // comparing with input
         assert_eq!(decoded.as_slice(), bytes);
@@ -240,6 +242,7 @@ mod test {
 
     #[test]
     fn roundtrips_long() {
-        roundtrip_full_alphabet(std::iter::range_inclusive(0u8, 0xFFu8).to_owned_vec());
+        let bytes: Vec<u8> = std::iter::range_inclusive(0u8, 0xFFu8).collect();
+        roundtrip_full_alphabet(bytes.as_slice());
     }
 }

@@ -24,7 +24,8 @@
 
 use std::cmp;
 use std::io;
-use std::vec;
+use std::vec::bytes::copy_memory;
+use std::vec_ng::Vec;
 
 static MAXBITS: uint = 15;
 static MAXLCODES: u16 = 286;
@@ -159,10 +160,10 @@ pub struct Decoder<R> {
     /// Wrapped reader which is exposed to allow getting it back.
     r: R,
 
-    priv output: ~[u8],
+    priv output: Vec<u8>,
     priv outpos: uint,
 
-    priv block: ~[u8],
+    priv block: Vec<u8>,
     priv pos: uint,
 
     priv bitbuf: uint,
@@ -176,9 +177,9 @@ impl<R: Reader> Decoder<R> {
     pub fn new(r: R) -> Decoder<R> {
         Decoder {
             r: r,
-            output: vec::with_capacity(HISTORY),
+            output: Vec::with_capacity(HISTORY),
             outpos: 0,
-            block: ~[],
+            block: Vec::new(),
             pos: 0,
             bitbuf: 0,
             bitcnt: 0,
@@ -188,7 +189,7 @@ impl<R: Reader> Decoder<R> {
 
     fn block(&mut self) -> io::IoResult<()> {
         self.pos = 0;
-        self.block = vec::with_capacity(4096);
+        self.block = Vec::with_capacity(4096);
         if try!(self.bits(1)) == 1 { self.eof = true; }
         match try!(self.bits(2)) {
             0 => self.statik(),
@@ -211,13 +212,13 @@ impl<R: Reader> Decoder<R> {
             self.output.push_all(self.block.slice(from, from + n));
         } else {
             assert_eq!(self.output.len(), HISTORY);
-            vec::bytes::copy_memory(self.output.mut_slice_from(self.outpos),
-                                    self.block.slice(from, from + n));
+            copy_memory(self.output.mut_slice(self.outpos, HISTORY),
+                        self.block.slice(from, from + n));
         }
         self.outpos += n;
         if n < amt {
-            vec::bytes::copy_memory(self.output,
-                                    self.block.slice_from(from + n));
+            copy_memory(self.output.as_mut_slice(),
+                        self.block.slice_from(from + n));
             self.outpos = amt - n;
         }
     }
@@ -226,7 +227,11 @@ impl<R: Reader> Decoder<R> {
         let len = try!(self.r.read_le_u16());
         let nlen = try!(self.r.read_le_u16());
         if !nlen != len { return error(InvalidStaticSize) }
-        try!(self.r.push_bytes(&mut self.block, len as uint));
+        //try!(self.r.push_bytes(&mut self.block, len as uint));
+        for _i in range(0, len as uint) {
+            let byte = try!(self.r.read_byte());
+            self.block.push(byte)
+        }
         self.update_output(0);
         self.bitcnt = 0;
         self.bitbuf = 0;
@@ -313,11 +318,13 @@ impl<R: Reader> Decoder<R> {
                     let min = cmp::min(dist, len);
                     let start = self.block.len();
                     for _ in range(0, min) {
-                        self.block.push(self.output[finger]);
+                        let tmp = *self.output.get(finger);
+                        self.block.push(tmp);
                         finger = (finger + 1) % HISTORY;
                     }
                     for i in range(min, len) {
-                        self.block.push(self.block[start + i - min]);
+                        let tmp = *self.block.get(start + i - min);
+                        self.block.push(tmp);
                     }
                 }
                 _ => return error(InvalidHuffmanCode)
@@ -447,7 +454,7 @@ impl<R: Reader> Decoder<R> {
         self.bitbuf = 0;
         self.bitcnt = 0;
         self.eof = false;
-        self.block = ~[];
+        self.block = Vec::new();
         self.pos = 0;
     }
 }
@@ -459,21 +466,20 @@ impl<R: Reader> Reader for Decoder<R> {
             try!(self.block());
         }
         let n = cmp::min(buf.len(), self.block.len() - self.pos);
-        vec::bytes::copy_memory(buf.mut_slice_to(n),
-                                self.block.slice(self.pos, self.pos + n));
+        copy_memory(buf.mut_slice_to(n),
+                    self.block.slice(self.pos, self.pos + n));
         self.pos += n;
         Ok(n)
     }
 }
 
 #[cfg(test)]
-#[allow(warnings)]
 mod test {
     use rand;
     use test;
-    use std::io::{BufReader, MemWriter};
+    use std::io::{BufReader};
+    use std::vec_ng::Vec;
     use super::{Decoder};
-    use std::str;
 
     // The input data for these tests were all generated from the zpipe.c
     // program found at http://www.zlib.net/zpipe.c and the zlib format has an
@@ -484,7 +490,7 @@ mod test {
 
     fn test_decode(input: &[u8], output: &[u8]) {
         let mut d = Decoder::new(BufReader::new(fixup(input)));
-        let got = d.read_to_end().unwrap();
+        let got: Vec<u8> = d.bytes().map(|b| b.unwrap()).collect();
         assert!(got.as_slice() == output);
     }
 
@@ -514,7 +520,7 @@ mod test {
         let input = include_bin!("data/test.z.1");
         let mut d = Decoder::new(BufReader::new(fixup(input)));
         assert!(!d.eof());
-        let mut out = ~[];
+        let mut out = Vec::new();
         loop {
             match d.read_byte() {
                 Ok(b) => out.push(b),
@@ -529,7 +535,7 @@ mod test {
     fn random_byte_lengths() {
         let input = include_bin!("data/test.z.1");
         let mut d = Decoder::new(BufReader::new(fixup(input)));
-        let mut out = ~[];
+        let mut out = Vec::new();
         let mut buf = [0u8, ..40];
         loop {
             match d.read(buf.mut_slice_to(1 + rand::random::<uint>() % 40)) {

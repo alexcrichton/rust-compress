@@ -128,7 +128,7 @@ pub fn main() {
                 return
             },
             Err(e) => {
-                error!("Unable to read input: {}", e.to_string());
+                error!("Unable to read input: {}", e);
                 return
             },
             _ => () //OK

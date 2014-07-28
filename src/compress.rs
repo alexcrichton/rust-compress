@@ -18,12 +18,14 @@ pub use Adler32 = self::checksum::adler::State32;
 // http://en.wikipedia.org/wiki/Checksum
 pub mod checksum {
     pub mod adler;
+    pub mod crc;
 }
 
 pub mod bwt;
 pub mod flate;
 pub mod lz4;
 pub mod zlib;
+pub mod gzip;
 
 /// Entropy coder family
 // http://en.wikipedia.org/wiki/Entropy_encoding

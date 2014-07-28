@@ -63,6 +63,9 @@ fn run(files: Vec<Path>) -> IoResult<()> {
                     }
                     let content = try!(memb.read_to_end());
                     if memb.file_name.len() > 0 {
+                        // Write to the embedded file name
+                        // Gzip's gunzip instead removes the .gz from the compressed
+                        // file, and concatenates multiple members
                         let path = Path::new(memb.file_name.as_slice());
                         if path.exists() {
                             return Err(io::IoError {

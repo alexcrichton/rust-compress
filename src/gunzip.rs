@@ -48,12 +48,18 @@ fn run(files: Vec<Path>) -> IoResult<()> {
             match decoder.member() {
                 Ok(ref mut memb) => {
                     if memb.file_name.len() > 0 {
-                        println!("Member: {}", memb.file_name);
+                        match String::from_utf8(memb.file_name.clone()) {
+                            Ok(s) => println!("Member: {}", s),
+                            Err(vec) => println!("Member: {}", vec.to_str())
+                        }
                     } else {
                         println!("Member: no name");
                     }
                     if memb.file_comment.len() > 0 {
-                        println!("Comment: {}", memb.file_comment);
+                        match String::from_utf8(memb.file_comment.clone()) {
+                            Ok(s) => println!("Comment: {}", s),
+                            Err(vec) => println!("Comment: {}", vec.to_str())
+                        }
                     }
                     let content = try!(memb.read_to_end());
                     if memb.file_name.len() > 0 {
@@ -62,7 +68,10 @@ fn run(files: Vec<Path>) -> IoResult<()> {
                             return Err(io::IoError {
                                 kind: io::PathAlreadyExists,
                                 desc: "file already exists",
-                                detail: Some(memb.file_name.to_str())
+                                detail: match String::from_utf8(memb.file_name.clone()){
+                                    Ok(s) => Some(s),
+                                    Err(_) => None
+                                }
                             });
                         }
                         let mut out_f = try!(File::create(&path));

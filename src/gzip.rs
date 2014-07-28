@@ -117,7 +117,7 @@ impl<'a, R: Reader> Decoder<'a, R> {
         let file_comment: Vec<u8>;
         {
             // from here, all reads should go through this reader (not self.r):
-            let mut crc_reader = crc::Reader32::new( &mut self.r, self.crc_table );
+            let mut crc_reader = crc::Reader32::new( &mut self.r.r, self.crc_table );
             
             let mut buf = [0u8, ..10];
             // read at least the first byte; EOF here is okay

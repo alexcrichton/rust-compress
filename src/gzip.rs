@@ -7,10 +7,24 @@
 //!
 //! ```rust
 //! use compress::gzip;
+//! use compress::checksum::crc;
 //! use std::io::File;
 //!
+//! let crc_table = crc::Table32::new();
 //! let stream = File::open(&Path::new("path/to/file.flate"));
-//! let decompressed = gzip::Decoder::new(stream).read_to_end();
+//! let decoder = gzip::Decoder::new(stream, &crc_table);
+//! loop {
+//!     match decoder.member() {
+//!             Ok(ref mut memb) => {
+//!                     println!("=== Member ===");
+//!                     if memb.file_name.len() > 0 { println!("Name:    {}", memb.file_name); }
+//!                     if memb.file_comment.len() > 0 { println!("Comment: {}", memb.file_comment); }
+//!                     println!("{}", try!(memb.read_to_end()));
+//!             },
+//!             Err(ref e) if e.kind == io::EndOfFile => { break; }
+//!             Err(e) => { return Err(e); }
+//!     }
+//! }
 //! ```
 //!
 //! # Related links
@@ -79,7 +93,7 @@ impl<'a, R: Reader> Decoder<'a, R> {
     */
     
     /// Same as new(), except use an existing CRC table
-    pub fn new_with_crc<'a>(reader: R, crc_table: &'a crc::Table32) -> Decoder<'a, R> {
+    pub fn new<'a>(reader: R, crc_table: &'a crc::Table32) -> Decoder<'a, R> {
         Decoder {
             crc_table: crc_table,
             r: flate::Decoder::new(reader)

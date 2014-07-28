@@ -200,7 +200,7 @@ impl<'a, R: Reader> Decoder<'a, R> {
         }       // destroy crc_reader; use self.r directly again
         
         if fhcrc {
-            let crc16 = try_no_eof!(self.r.read_le_u16());
+            let crc16 = try_no_eof!(self.r.r.read_le_u16());
             if (crc & 0xFFFF) != crc16 as u32 {
                 return Err(io::IoError {
                     kind: io::InvalidInput,
@@ -209,6 +209,8 @@ impl<'a, R: Reader> Decoder<'a, R> {
                 })
             }
         }
+        
+        self.r.reset(); // in case of multiple streams, we need to reset now
         
         Ok(Member{
             file_name: file_name,
